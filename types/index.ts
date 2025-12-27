@@ -22,13 +22,27 @@ export interface Expense {
 export type LoanType = "borrowed" | "lent";
 export type LoanStatus = "pending" | "paid" | "overdue" | "closed";
 
+export type LoanTransactionType = "payment" | "lending" | "interest";
+
+export interface LoanTransaction {
+  id: string;
+  date: string;
+  amount: number;
+  type: LoanTransactionType;
+  note?: string;
+}
+
 export interface Loan {
   id: string;
   personName: string;
-  amount: number;
+  amount: number; // Principal Amount
   loanType: LoanType;
   emiAmount?: number;
   interestRate?: number;
+  repaymentType?: "one-time" | "emi";
+  tenureMonths?: number;
+  paidAmount?: number; // Total amount paid back
+  history?: LoanTransaction[];
   startDate: string; // ISO date string
   dueDate?: string; // ISO date string
   status: LoanStatus;
