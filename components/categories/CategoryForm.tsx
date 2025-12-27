@@ -92,7 +92,7 @@ export function CategoryForm({ initialData, onSubmit, onCancel }: CategoryFormPr
 
                 <div className="space-y-2">
                     <Label>Icon</Label>
-                    <div className="flex items-center gap-4 p-3 border rounded-md bg-card">
+                    <div className="flex items-center gap-4 p-3 border border-dashed border-slate-200 rounded-md bg-card">
                         <div className={cn(
                             "h-12 w-12 rounded-full flex items-center justify-center border",
                             color
@@ -109,11 +109,12 @@ export function CategoryForm({ initialData, onSubmit, onCancel }: CategoryFormPr
                     </div>
                 </div>
 
-                <div className="flex justify-end gap-2 pt-4">
-                    <Button type="button" variant="outline" onClick={onCancel} disabled={isSubmitting}>
-                        Cancel
-                    </Button>
-                    <Button type="submit" disabled={isSubmitting || !name.trim()}>
+                <div className="pt-4">
+                    <Button
+                        type="submit"
+                        disabled={isSubmitting || !name.trim()}
+                        className="w-full h-11 bg-[#0f1729] hover:bg-[#0f1729]/90 text-white font-bold shadow-lg shadow-[#0f1729]/20 rounded-xl"
+                    >
                         {isSubmitting ? "Saving..." : initialData ? "Update Category" : "Add Category"}
                     </Button>
                 </div>
@@ -149,7 +150,7 @@ export function CategoryForm({ initialData, onSubmit, onCancel }: CategoryFormPr
                         </div>
 
                         <div className="flex-1 overflow-y-auto p-4">
-                            <div className="grid grid-cols-4 sm:grid-cols-8 gap-2">
+                            <div className="grid grid-cols-4 sm:grid-cols-6 gap-3">
                                 {filteredIcons.slice(0, 100).map(({ name: iconName, icon: Icon }) => (
                                     <button
                                         key={iconName}
@@ -159,24 +160,29 @@ export function CategoryForm({ initialData, onSubmit, onCancel }: CategoryFormPr
                                             setIsIconPickerOpen(false);
                                         }}
                                         className={cn(
-                                            "flex flex-col items-center justify-center gap-1 rounded-md border p-2 hover:bg-muted transition-colors aspect-square",
-                                            icon === iconName ? "bg-muted border-primary ring-1 ring-primary" : "bg-card"
+                                            "flex flex-col items-center justify-center gap-2 rounded-xl border p-3 hover:bg-slate-50 hover:border-slate-300 transition-all aspect-square group",
+                                            icon === iconName
+                                                ? "bg-slate-900 border-slate-900 text-white hover:bg-slate-800 hover:border-slate-800 shadow-md transform scale-105"
+                                                : "bg-white border-slate-200 text-slate-600"
                                         )}
                                         title={iconName}
                                     >
-                                        <Icon className="h-6 w-6" />
-                                        <span className="text-[10px] truncate w-full text-center">{iconName}</span>
+                                        <Icon className={cn("h-7 w-7 transition-transform group-hover:scale-110", icon === iconName ? "text-white" : "text-slate-700")} />
+                                        <span className={cn("text-[10px] font-medium truncate w-full text-center leading-tight", icon === iconName ? "text-slate-200" : "text-slate-500")}>
+                                            {iconName}
+                                        </span>
                                     </button>
                                 ))}
                             </div>
                             {filteredIcons.length > 100 && (
-                                <div className="text-center pt-4 text-xs text-muted-foreground">
+                                <div className="text-center pt-6 text-xs font-medium text-slate-400">
                                     Showing first 100 of {filteredIcons.length} matches. Type specifically to find more.
                                 </div>
                             )}
                             {filteredIcons.length === 0 && (
-                                <div className="text-center py-8 text-muted-foreground">
-                                    No icons found matching "{iconSearch}"
+                                <div className="text-center py-12 text-slate-400 flex flex-col items-center gap-2">
+                                    <Search className="h-8 w-8 opacity-50" />
+                                    <p>No icons found matching "{iconSearch}"</p>
                                 </div>
                             )}
                         </div>

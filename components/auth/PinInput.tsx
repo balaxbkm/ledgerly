@@ -55,7 +55,11 @@ export function PinInput({ length = 4, onComplete, disabled, error }: PinInputPr
     // Auto-focus first input on mount
     useEffect(() => {
         if (!disabled && inputRefs.current[0]) {
-            inputRefs.current[0].focus();
+            // Small timeout to ensure DOM is ready and animations don't block focus
+            const timer = setTimeout(() => {
+                inputRefs.current[0]?.focus();
+            }, 100);
+            return () => clearTimeout(timer);
         }
     }, [disabled]);
 

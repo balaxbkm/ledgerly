@@ -16,8 +16,9 @@ interface CategoryListProps {
 export function CategoryList({ categories, onEdit, onDelete }: CategoryListProps) {
     if (!categories || !Array.isArray(categories) || categories.length === 0) {
         return (
-            <div className="text-center py-10 text-muted-foreground">
-                No categories found. Create one!
+            <div className="text-center py-20 text-slate-400 bg-slate-50 rounded-3xl border border-dashed border-slate-200">
+                <p className="font-medium">No categories found</p>
+                <p className="text-sm">Create your first category to get started!</p>
             </div>
         );
     }
@@ -27,25 +28,25 @@ export function CategoryList({ categories, onEdit, onDelete }: CategoryListProps
             {categories.map((category) => {
                 const Icon = CATEGORY_ICONS[category.icon] || CATEGORY_ICONS.Misc;
                 return (
-                    <Card key={category.id} className="overflow-hidden">
+                    <Card key={category.id} className="overflow-hidden rounded-2xl border-slate-200 bg-white transition-all duration-200 hover:shadow-lg hover:border-slate-300 group">
                         <CardContent className="p-4 flex items-center justify-between">
-                            <div className="flex items-center gap-3">
+                            <div className="flex items-center gap-4">
                                 <div className={cn(
-                                    "h-10 w-10 rounded-full flex items-center justify-center",
+                                    "h-12 w-12 rounded-xl flex items-center justify-center transition-transform group-hover:scale-110 shadow-sm",
                                     category.color
                                 )}>
-                                    <Icon className="h-5 w-5" />
+                                    <Icon className="h-6 w-6" />
                                 </div>
-                                <span className="font-medium truncate max-w-[120px]" title={category.name}>
+                                <span className="font-bold text-slate-700 truncate max-w-[150px] text-base" title={category.name}>
                                     {category.name}
                                 </span>
                             </div>
-                            <div className="flex items-center gap-1">
+                            <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
                                 <Button
                                     variant="ghost"
                                     size="icon"
                                     onClick={() => onEdit(category)}
-                                    className="h-8 w-8 text-muted-foreground hover:text-foreground"
+                                    className="h-9 w-9 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-full"
                                 >
                                     <Edit2 className="h-4 w-4" />
                                 </Button>
@@ -54,7 +55,7 @@ export function CategoryList({ categories, onEdit, onDelete }: CategoryListProps
                                         variant="ghost"
                                         size="icon"
                                         onClick={() => onDelete(category.id)}
-                                        className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                                        className="h-9 w-9 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-full"
                                     >
                                         <Trash2 className="h-4 w-4" />
                                     </Button>

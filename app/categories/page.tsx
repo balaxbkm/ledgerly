@@ -44,14 +44,17 @@ export default function CategoriesPage() {
 
     return (
         <div className="container max-w-4xl mx-auto py-6 space-y-6">
-            <div className="flex items-center justify-between">
-                <div className="flex items-center gap-4">
-                    <Button variant="ghost" size="icon" onClick={() => router.back()}>
-                        <ArrowLeft className="h-4 w-4" />
-                    </Button>
-                    <h1 className="text-2xl font-bold">Categories</h1>
+            <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between">
+                <div>
+                    <div className="flex items-center gap-2">
+                        <Button variant="ghost" size="icon" onClick={() => router.back()} className="-ml-3 text-slate-400 hover:text-slate-600">
+                            <ArrowLeft className="h-5 w-5" />
+                        </Button>
+                        <h1 className="text-3xl font-bold tracking-tight text-slate-900">Categories</h1>
+                    </div>
+                    <p className="text-slate-500 ml-9">Organize your expenses with custom categories.</p>
                 </div>
-                <Button onClick={handleAdd}>
+                <Button onClick={handleAdd} className="w-full sm:w-auto shadow-lg shadow-[#0f1729]/20 bg-[#0f1729] hover:bg-[#0f1729]/90 text-white border-none rounded-xl">
                     <Plus className="mr-2 h-4 w-4" />
                     New Category
                 </Button>
