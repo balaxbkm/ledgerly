@@ -22,4 +22,7 @@ export interface StorageService {
     // Settings
     getSettings(): Promise<Settings | null>;
     saveSettings(settings: Settings): Promise<void>;
+
+    // System
+    clearAll(): Promise<void>;
 }

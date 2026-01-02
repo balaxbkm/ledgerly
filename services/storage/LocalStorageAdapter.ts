@@ -122,4 +122,9 @@ export class LocalStorageAdapter implements StorageService {
         await this.delay();
         localStorage.setItem(KEYS.SETTINGS, JSON.stringify(settings));
     }
+
+    async clearAll(): Promise<void> {
+        await this.delay();
+        localStorage.clear();
+    }
 }

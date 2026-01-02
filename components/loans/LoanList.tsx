@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useRef } from "react";
 import { format, differenceInMonths, addMonths, isAfter, isSameDay, differenceInDays, differenceInMinutes } from "date-fns";
-import { Check, Trash2, Clock, AlertCircle, Calendar, Wallet, Banknote, XCircle, AlertTriangle, CreditCard, Plus, User, History } from "lucide-react";
+import { Check, Trash2, Clock, AlertCircle, Calendar, Wallet, Banknote, XCircle, AlertTriangle, CreditCard, Plus, User, History, TrendingUp } from "lucide-react";
 import { Loan } from "@/types";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -16,13 +16,13 @@ interface LoanListProps {
     typeFilter: "lent" | "borrowed";
 }
 
-type DialogType = "alert" | "confirm" | "prompt" | "payment" | "history";
+type DialogType = "alert" | "confirm" | "prompt" | "payment" | "history" | "topup";
 
 interface DialogState {
     isOpen: boolean;
     type: DialogType;
     title: string;
-    message?: string;
+    message?: string | React.ReactNode;
     defaultValue?: string;
     placeholder?: string;
     confirmLabel?: string;
@@ -43,6 +43,8 @@ export function LoanList({ loans, typeFilter }: LoanListProps) {
 
     // Initial value for prompt input
     const [promptValue, setPromptValue] = useState("");
+    const [topUpAmount, setTopUpAmount] = useState("");
+    const [topUpMode, setTopUpMode] = useState<'tenure' | 'emi'>('tenure');
     const [currentTime, setCurrentTime] = useState(new Date());
 
     useEffect(() => {
@@ -53,35 +55,9 @@ export function LoanList({ loans, typeFilter }: LoanListProps) {
 
     const filtered = loans.filter((l) => l.loanType === typeFilter);
 
-    // Effect: Apply monthly interest for EMI loans on the 1st of each month
-    useEffect(() => {
-        const checkAndApplyInterest = async () => {
-            const now = new Date();
-            for (const loan of loans) {
-                if (loan.repaymentType === 'emi' && loan.status === 'pending' && (loan.interestRate || 0) > 0) {
-                    const lastApplied = loan.lastInterestAppliedDate ? new Date(loan.lastInterestAppliedDate) : new Date(loan.startDate);
-
-                    // check if current time is in a subsequent month relative to the last time we applied interest
-                    const isFutureMonth = (now.getFullYear() > lastApplied.getFullYear()) ||
-                        (now.getFullYear() === lastApplied.getFullYear() && now.getMonth() > lastApplied.getMonth());
-
-                    if (isFutureMonth) {
-                        // Calculate interest on the *current outstanding* amount
-                        const interestToAdd = loan.amount * ((loan.interestRate || 0) / 100);
-
-                        // Update the loan
-                        await updateLoan({
-                            ...loan,
-                            amount: loan.amount + interestToAdd,
-                            lastInterestAppliedDate: now.toISOString()
-                        });
-                    }
-                }
-            }
-        };
-
-        checkAndApplyInterest();
-    }, [loans, updateLoan]);
+    // Standard Amortization: We do NOT auto-increase the principal balance for EMI loans.
+    // Instead, interest is calculated at the time of payment allocation.
+    // So we remove the previous auto-apply effect to prevent double accounting or non-standard balance inflation.
 
     const closeDialog = () => {
         setDialog(prev => ({ ...prev, isOpen: false }));
@@ -99,7 +75,7 @@ export function LoanList({ loans, typeFilter }: LoanListProps) {
         });
     };
 
-    const showConfirm = (title: string, message: string, onConfirm: () => void, confirmLabel = "Confirm") => {
+    const showConfirm = (title: string, message: string | React.ReactNode, onConfirm: () => void, confirmLabel = "Confirm") => {
         setDialog({
             isOpen: true,
             type: "confirm",
@@ -221,9 +197,16 @@ export function LoanList({ loans, typeFilter }: LoanListProps) {
 
                 if (amount >= loan.amount) {
                     // Chained confirmation for full payment
+                    // Chained confirmation for full payment
                     showConfirm(
-                        "Full Payment Detected",
-                        `The amount entered (${formatCurrency(amount)}) covers the full outstanding loan (${formatCurrency(loan.amount)}). Mark as fully paid?`,
+                        "Confirm Full Payment",
+                        <div className="flex flex-col items-center gap-3 py-2">
+                            <span className="text-slate-500 text-sm font-medium">Paying Full Outstanding</span>
+                            <span className="text-4xl font-black text-emerald-600 tracking-tight">{formatCurrency(loan.amount)}</span> {/* Use loan.amount as it covers full */}
+                            <p className="text-xs text-slate-400 text-center max-w-[240px] leading-relaxed">
+                                You entered {formatCurrency(amount)}. This will clear the entire loan balance and mark it as paid.
+                            </p>
+                        </div>,
                         () => updateLoan(addToHistory({
                             ...loan,
                             status: "paid",
@@ -258,35 +241,93 @@ export function LoanList({ loans, typeFilter }: LoanListProps) {
     };
 
     const handleTopUp = (loan: Loan) => {
-        showPrompt(
-            "Lend More",
-            `Enter additional amount to lend to ${loan.personName}`,
-            (amountStr) => {
-                const addedAmount = parseFloat(amountStr);
-                if (isNaN(addedAmount) || addedAmount <= 0) {
-                    showAlert("Invalid Amount", "Please enter a valid positive number.");
-                    return;
+        setTopUpAmount("");
+        setTopUpMode("tenure");
+        setDialog({
+            isOpen: true,
+            type: "topup",
+            title: `Lend More to ${loan.personName}`,
+            payload: loan,
+            onConfirm: () => { },
+        });
+    };
+
+    const submitTopUp = () => {
+        const loan = dialog.payload;
+        const addedAmount = parseFloat(topUpAmount);
+
+        if (isNaN(addedAmount) || addedAmount <= 0) {
+            showAlert("Invalid Amount", "Please enter a valid positive number.");
+            return;
+        }
+
+        let updatedLoan = { ...loan };
+        let description = "";
+
+        if (loan.repaymentType === 'emi') {
+            updatedLoan.amount = (updatedLoan.amount || 0) + addedAmount;
+
+            if (topUpMode === 'emi') {
+                // Increase EMI: Keep tenure roughly same, so recalculate EMI for new Principal
+                const startDate = new Date(loan.startDate);
+                const monthsPassed = differenceInMonths(new Date(), startDate);
+                const remainingMonths = Math.max(1, (loan.tenureMonths || 12) - monthsPassed);
+
+                const P = updatedLoan.amount;
+                const N = remainingMonths;
+                const R = (loan.interestRate || 0) / 12 / 100;
+
+                let newEmi = 0;
+                if (R > 0) {
+                    const x = Math.pow(1 + R, N);
+                    newEmi = (P * R * x) / (x - 1);
+                } else {
+                    newEmi = P / N;
                 }
 
-                const interestRate = loan.interestRate || 0;
-                const interestComponent = addedAmount * (interestRate / 100);
-                const totalToAdd = addedAmount + interestComponent;
+                updatedLoan.emiAmount = Math.ceil(newEmi);
+                description = `Top-up: ${formatCurrency(addedAmount)} added. EMI increased to ${formatCurrency(updatedLoan.emiAmount)} to maintain tenure.`;
+            } else {
+                // Increase Tenure: Keep EMI same.
+                const emiCount = (loan.history || []).filter((h: any) => h.action === "payment" && h.description.toLowerCase().includes("emi")).length;
 
-                const updatedLoan = {
-                    ...loan,
-                    amount: loan.amount + totalToAdd,
-                };
+                const currentEmi = loan.emiAmount || 1;
+                const P = updatedLoan.amount;
+                const R = (loan.interestRate || 0) / 12 / 100;
 
-                // For non-EMI, track the fixed interest component
-                if (loan.repaymentType !== 'emi') {
-                    updatedLoan.fixedInterestAmount = (updatedLoan.fixedInterestAmount || 0) + interestComponent;
+                let newRemaining = 0;
+                if (R > 0) {
+                    if ((P * R) < currentEmi) {
+                        const nper = -Math.log(1 - (P * R) / currentEmi) / Math.log(1 + R);
+                        newRemaining = Math.ceil(nper - 0.1);
+                    } else {
+                        newRemaining = Math.ceil(P / currentEmi);
+                    }
+                } else {
+                    newRemaining = Math.ceil(P / currentEmi);
                 }
 
-                updateLoan(addToHistory(updatedLoan, "edit", `Top-up: Added ${formatCurrency(addedAmount)} (+${formatCurrency(interestComponent)} interest)`, totalToAdd));
-
-                // Optional: Show success feedback or confirmation
+                updatedLoan.tenureMonths = emiCount + newRemaining;
+                description = `Top-up: ${formatCurrency(addedAmount)} added. Tenure extended to ${updatedLoan.tenureMonths} months.`;
             }
-        );
+        } else {
+            // Non-EMI (Fixed Interest or One-time)
+            // Existing logic: add flat interest if defined? Or just Principal?
+            // "35% P.A." implies simple/compound interest.
+            // If we top up, we technically restart or just add principal?
+            // Let's follow previous logic: P + Interest.
+            // But wait, previous logic added interest IMMEDIATELY to 'amount'. That effectively compounds it upfront.
+            // If 'interestRate' is present, we might assume interest accumulates.
+            // For safety and simplicity given "Top Up", let's just add Principal. User can edit interest if needed?
+            // Or stick to previous code's logic if it was "Fixed Interest" mode?
+            // The previous code unconditionally calculated `interestComponent`.
+            // Let's replicate reasonable behavior: Just add Principal.
+            updatedLoan.amount += addedAmount;
+            description = `Top-up: ${formatCurrency(addedAmount)} added.`;
+        }
+
+        updateLoan(addToHistory(updatedLoan, "edit", description, addedAmount));
+        setDialog(prev => ({ ...prev, isOpen: false }));
     };
 
     if (filtered.length === 0) {
@@ -326,6 +367,39 @@ export function LoanList({ loans, typeFilter }: LoanListProps) {
 
                     const isOverdue = !isPaid && !isWrittenOff && isAfter(now, displayDueDate) && !isSameDay(now, displayDueDate);
                     const daysOverdue = isOverdue ? differenceInDays(now, displayDueDate) : 0;
+
+                    // Pre-calculate Standard EMI & Total Interest for Display
+                    let displayTotalInterest = 0;
+                    if (loan.repaymentType === "emi" && loan.status !== 'paid' && loan.status !== 'written-off') {
+                        let emi = loan.emiAmount;
+                        const P = loan.amount;
+                        const R = (loan.interestRate || 0) / 12 / 100;
+                        const N_Total = loan.tenureMonths || 1;
+                        if (!emi) {
+                            if (R > 0) {
+                                const x = Math.pow(1 + R, N_Total);
+                                emi = (P * R * x) / (x - 1);
+                            } else { emi = P / N_Total; }
+                        }
+                        emi = emi || 0;
+
+                        if (R > 0 && emi > P * R) {
+                            const nper = -Math.log(1 - (P * R) / emi) / Math.log(1 + R);
+                            const remaining = Math.ceil(nper - 0.1);
+                            displayTotalInterest = (emi * remaining) - P;
+                        } else {
+                            displayTotalInterest = 0;
+                        }
+                    } else {
+                        // One-time repayment: use fixed amount or calculate flat rate interest
+                        if (loan.fixedInterestAmount) {
+                            displayTotalInterest = loan.fixedInterestAmount;
+                        } else if (loan.interestRate && loan.interestRate > 0) {
+                            // Implied flat interest: Principal * (Rate/100)
+                            // This is the standard interpretation for "One-time repayment with X% interest" without a timeline.
+                            displayTotalInterest = loan.amount * (loan.interestRate / 100);
+                        }
+                    }
 
                     return (
                         <Card key={loan.id} className={cn(
@@ -405,14 +479,16 @@ export function LoanList({ loans, typeFilter }: LoanListProps) {
                                             )}>
                                                 {formatCurrency(loan.amount)}
                                             </span>
-                                            {(loan.interestRate || 0) > 0 || (loan.fixedInterestAmount || 0) > 0 ? (
+                                            {(loan.interestRate || 0) > 0 || displayTotalInterest > 0 ? (
                                                 <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider bg-slate-50 px-1.5 py-0.5 rounded border border-slate-100">
-                                                    {(loan.interestRate || 0) > 0 && `${loan.interestRate}%`}
-                                                    {loan.repaymentType === "emi" ? (
-                                                        (loan.interestRate || 0) > 0 && ` + ${formatCurrency(loan.amount * ((loan.interestRate || 0) / 100))}/mo`
-                                                    ) : (loan.fixedInterestAmount || 0) > 0 ? (
-                                                        ` + ${formatCurrency(loan.fixedInterestAmount || 0)}`
-                                                    ) : ""}
+                                                    {(loan.interestRate || 0) > 0 && (
+                                                        <span>{loan.interestRate}% {loan.repaymentType === "emi" ? "p.a." : ""}</span>
+                                                    )}
+                                                    {displayTotalInterest > 0 && (
+                                                        <span className="ml-1">
+                                                            ({(loan.interestRate || 0) > 0 ? "+" : ""}{formatCurrency(displayTotalInterest)})
+                                                        </span>
+                                                    )}
                                                 </span>
                                             ) : (
                                                 <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider bg-slate-50 px-1.5 py-0.5 rounded border border-slate-100">
@@ -461,28 +537,62 @@ export function LoanList({ loans, typeFilter }: LoanListProps) {
                                 <div className="mt-4 pt-3 border-t border-dashed border-slate-200 flex flex-wrap items-center justify-between gap-3">
                                     <div className="flex-1 min-w-0">
                                         {loan.repaymentType === "emi" && loan.tenureMonths ? (
-                                            <div className="flex flex-col items-start text-xs text-muted-foreground">
+                                            <div className="flex flex-col items-start text-xs text-muted-foreground w-full">
                                                 {(() => {
-                                                    // Calculate EMI Amount (prefer stored fixed amount, else estimate)
-                                                    // Note: Fallback estimate using current amount is widely inaccurate for old loans if principal decreases, 
-                                                    // but best effort if data missing.
-                                                    const emiAmount = loan.emiAmount || ((loan.amount + (loan.amount * (loan.interestRate || 0) / 100)) / loan.tenureMonths);
-                                                    const remainingEmis = Math.ceil(loan.amount / (emiAmount || 1));
+                                                    // Estimate EMI if not stored (Using Reducing Balance Standard)
+                                                    let emiAmount = loan.emiAmount;
+                                                    const P = loan.amount;
+                                                    const N_Total = loan.tenureMonths;
+                                                    const R = (loan.interestRate || 0) / 12 / 100;
+
+                                                    if (!emiAmount) {
+                                                        if (R > 0) {
+                                                            const x = Math.pow(1 + R, N_Total);
+                                                            emiAmount = (P * R * x) / (x - 1);
+                                                        } else {
+                                                            emiAmount = P / N_Total;
+                                                        }
+                                                    }
+                                                    emiAmount = emiAmount || 1; // Prevent zero division
+
+                                                    // Calculate Remaining EMIs (NPER) accurately
+                                                    let remainingEmis = 0;
+                                                    let totalFutureInterest = 0;
+
+                                                    if (R > 0) {
+                                                        // NPER = -ln(1 - (r*P)/E) / ln(1+r)
+                                                        // Check viability: if r*P >= E, loan never clears (interest > emi)
+                                                        if ((P * R) < emiAmount) {
+                                                            const nper = -Math.log(1 - (P * R) / emiAmount) / Math.log(1 + R);
+                                                            remainingEmis = Math.ceil(nper - 0.1);
+                                                            totalFutureInterest = (emiAmount * remainingEmis) - P;
+                                                        } else {
+                                                            remainingEmis = N_Total; // Fallback
+                                                            totalFutureInterest = 0;
+                                                        }
+                                                    } else {
+                                                        remainingEmis = Math.ceil(P / emiAmount);
+                                                        totalFutureInterest = 0;
+                                                    }
 
                                                     return (
-                                                        <div className="flex items-center gap-3">
-                                                            <div className="h-8 w-0.5 bg-indigo-500/30 rounded-full shrink-0" />
-                                                            <div>
-                                                                <div className="flex items-baseline gap-1.5">
-                                                                    <span className="font-bold text-indigo-950 text-sm leading-none">
-                                                                        {formatCurrency(emiAmount)}
+                                                        <div className="flex items-center justify-between w-full">
+                                                            <div className="flex items-center gap-3">
+                                                                <div className="h-8 w-0.5 bg-indigo-500/30 rounded-full shrink-0" />
+                                                                <div>
+                                                                    <div className="flex items-baseline gap-1.5">
+                                                                        <span className="font-bold text-indigo-950 text-sm leading-none">
+                                                                            {formatCurrency(emiAmount)}
+                                                                        </span>
+                                                                        <span className="text-[10px] text-slate-500 font-medium">/ month</span>
+                                                                    </div>
+                                                                    <span className="text-[11px] font-medium text-indigo-600 mt-0.5 block">
+                                                                        {Math.max(0, remainingEmis)}<span className="text-indigo-400 font-normal">/{N_Total} EMIs left</span>
                                                                     </span>
-                                                                    <span className="text-[10px] text-slate-500 font-medium">/ month</span>
                                                                 </div>
-                                                                <span className="text-[11px] font-medium text-indigo-600 mt-0.5 block">
-                                                                    {Math.max(0, remainingEmis)} <span className="text-indigo-400 font-normal">of {loan.tenureMonths} EMIs left</span>
-                                                                </span>
                                                             </div>
+
+
                                                         </div>
                                                     );
                                                 })()}
@@ -491,18 +601,21 @@ export function LoanList({ loans, typeFilter }: LoanListProps) {
                                             <div className="flex items-center gap-3">
                                                 <div className="h-8 w-0.5 bg-slate-400/30 rounded-full shrink-0" />
                                                 <div className="flex flex-col items-start text-xs text-muted-foreground">
-                                                    <span className="font-medium text-slate-700">
-                                                        Single Repay
-                                                    </span>
-                                                    {(loan.partPaymentCount || 0) > 0 ? (
-                                                        <span className="text-[10px] text-red-600 font-medium mt-0.5 flex items-center gap-1">
-                                                            {loan.partPaymentCount} Part Payment{(loan.partPaymentCount || 0) > 1 ? 's' : ''}
+                                                    <div className="flex flex-col">
+                                                        <span className="font-medium text-slate-700">
+                                                            Single Repay
                                                         </span>
-                                                    ) : (
-                                                        <span className="text-[10px] text-muted-foreground mt-0.5 opacity-80">
-                                                            Full payment expected
-                                                        </span>
-                                                    )}
+
+                                                        {(loan.partPaymentCount || 0) > 0 ? (
+                                                            <span className="text-[10px] text-indigo-600 font-medium mt-0.5 flex items-center gap-1">
+                                                                {loan.partPaymentCount} Part Payment{(loan.partPaymentCount || 0) > 1 ? 's' : ''}
+                                                            </span>
+                                                        ) : (
+                                                            <span className="text-[10px] text-muted-foreground mt-0.5 opacity-80">
+                                                                Full payment expected
+                                                            </span>
+                                                        )}
+                                                    </div>
                                                 </div>
                                             </div>
                                         )}
@@ -526,15 +639,7 @@ export function LoanList({ loans, typeFilter }: LoanListProps) {
                                                             <CreditCard className="h-3 w-3 mr-1" /> Pay
                                                         </Button>
 
-                                                        <Button
-                                                            variant="outline"
-                                                            size="sm"
-                                                            className="h-8 text-xs bg-blue-50 text-blue-600 hover:bg-blue-100 hover:text-blue-800 border-blue-200"
-                                                            onClick={() => handleHistory(loan)}
-                                                            title="View History"
-                                                        >
-                                                            <History className="h-3.5 w-3.5 mr-1.5" /> History
-                                                        </Button>
+
 
                                                         {daysOverdue >= 40 && (
                                                             <Button
@@ -552,9 +657,31 @@ export function LoanList({ loans, typeFilter }: LoanListProps) {
 
                                                 {(isPaid || isWrittenOff) && (
                                                     <span className="text-xs text-muted-foreground italic mr-2">
-                                                        {isPaid ? "Loan Fully Paid" : "Loan Written Off"}
+                                                        {(() => {
+                                                            if (!isPaid) return "Loan Written Off";
+
+                                                            const hasForeclosed = loan.history?.some((h: any) => h.description?.toLowerCase().includes("foreclose"));
+                                                            if (hasForeclosed) return "Loan Foreclosed";
+
+                                                            if (loan.repaymentType === 'emi') {
+                                                                const emiCount = (loan.history || []).filter((h: any) => h.action === "payment" && h.description?.toLowerCase().includes("emi")).length;
+                                                                if (emiCount < (loan.tenureMonths || 0)) return "Loan Foreclosed";
+                                                            }
+
+                                                            return "Loan Fully Paid";
+                                                        })()}
                                                     </span>
                                                 )}
+
+                                                <Button
+                                                    variant="outline"
+                                                    size="sm"
+                                                    className="h-8 text-xs bg-blue-50 text-blue-600 hover:bg-blue-100 hover:text-blue-800 border-blue-200"
+                                                    onClick={() => handleHistory(loan)}
+                                                    title="View History"
+                                                >
+                                                    <History className="h-3.5 w-3.5 mr-1.5" /> History
+                                                </Button>
 
                                                 {isPaid && (
                                                     <Button
@@ -593,15 +720,7 @@ export function LoanList({ loans, typeFilter }: LoanListProps) {
                                                             <CreditCard className="h-3 w-3 mr-1" /> Pay
                                                         </Button>
 
-                                                        <Button
-                                                            variant="outline"
-                                                            size="sm"
-                                                            className="h-8 text-xs bg-blue-50 text-blue-600 hover:bg-blue-100 hover:text-blue-800 border-blue-200"
-                                                            onClick={() => handleHistory(loan)}
-                                                            title="View History"
-                                                        >
-                                                            <History className="h-3.5 w-3.5 mr-1.5" /> History
-                                                        </Button>
+
 
                                                         {daysOverdue >= 40 && (
                                                             <Button
@@ -619,9 +738,31 @@ export function LoanList({ loans, typeFilter }: LoanListProps) {
 
                                                 {(isPaid || isWrittenOff) && (
                                                     <span className="text-xs text-muted-foreground italic mr-2">
-                                                        {isPaid ? "Loan Fully Paid" : "Loan Written Off"}
+                                                        {(() => {
+                                                            if (!isPaid) return "Loan Written Off";
+
+                                                            const hasForeclosed = loan.history?.some((h: any) => h.description?.toLowerCase().includes("foreclose"));
+                                                            if (hasForeclosed) return "Loan Foreclosed";
+
+                                                            if (loan.repaymentType === 'emi') {
+                                                                const emiCount = (loan.history || []).filter((h: any) => h.action === "payment" && h.description?.toLowerCase().includes("emi")).length;
+                                                                if (emiCount < (loan.tenureMonths || 0)) return "Loan Foreclosed";
+                                                            }
+
+                                                            return "Loan Fully Paid";
+                                                        })()}
                                                     </span>
                                                 )}
+
+                                                <Button
+                                                    variant="outline"
+                                                    size="sm"
+                                                    className="h-8 text-xs bg-blue-50 text-blue-600 hover:bg-blue-100 hover:text-blue-800 border-blue-200"
+                                                    onClick={() => handleHistory(loan)}
+                                                    title="View History"
+                                                >
+                                                    <History className="h-3.5 w-3.5 mr-1.5" /> History
+                                                </Button>
 
                                                 {/* Allow unmarking paid/written-off or deleting */}
                                                 {isPaid && (loan.undoData && differenceInMinutes(currentTime, new Date(loan.undoData.timestamp)) < 2) && (
@@ -661,9 +802,9 @@ export function LoanList({ loans, typeFilter }: LoanListProps) {
             >
                 <div className="space-y-4">
                     {dialog.message && (
-                        <p className="text-sm text-muted-foreground leading-relaxed">
+                        <div className="text-sm text-muted-foreground leading-relaxed">
                             {dialog.message}
-                        </p>
+                        </div>
                     )}
 
                     {dialog.type === "payment" && dialog.payload && (
@@ -688,18 +829,45 @@ export function LoanList({ loans, typeFilter }: LoanListProps) {
                                                 variant="outline"
                                                 disabled={isEmiPaidRecently}
                                                 onClick={() => {
-                                                    // Calculate current EMI
-                                                    const currentEmi = loan.emiAmount || ((loan.amount + (loan.amount * (loan.interestRate || 0) / 100)) / (loan.tenureMonths || 1));
+                                                    // Estimate EMI if missing (Standard Reducing Balance)
+                                                    let currentEmi = loan.emiAmount;
+                                                    if (!currentEmi && loan.tenureMonths) {
+                                                        const P = loan.amount;
+                                                        const N = loan.tenureMonths || 1;
+                                                        const R = (loan.interestRate || 0) / 12 / 100;
+                                                        if (R > 0) {
+                                                            const x = Math.pow(1 + R, N);
+                                                            currentEmi = (P * R * x) / (x - 1);
+                                                        } else {
+                                                            currentEmi = P / N;
+                                                        }
+                                                    }
+                                                    currentEmi = currentEmi || 0;
 
                                                     showConfirm(
                                                         "Confirm EMI Payment",
-                                                        `Pay current EMI of ${formatCurrency(currentEmi)}? This will reduce the outstanding balance.`,
-                                                        () => updateLoan({
-                                                            ...loan,
-                                                            amount: Math.max(0, loan.amount - currentEmi),
-                                                            lastEmiPaymentDate: new Date().toISOString()
-                                                        }),
-                                                        "Pay EMI"
+                                                        <div className="flex flex-col items-center gap-3 py-2">
+                                                            <span className="text-slate-500 text-sm font-medium">Paying Monthly Installment</span>
+                                                            <span className="text-4xl font-black text-slate-800 tracking-tight">{formatCurrency(currentEmi)}</span>
+                                                            <p className="text-xs text-slate-400 text-center max-w-[240px] leading-relaxed">
+                                                                This payment will cover your EMI for this month and reduce the outstanding balance.
+                                                            </p>
+                                                        </div>,
+                                                        () => {
+                                                            const emiPmtCount = (loan.history || []).filter((h: any) => h.action === "payment" && h.description.toLowerCase().includes("emi")).length + 1;
+                                                            const getOrdinal = (n: number) => {
+                                                                const s = ["th", "st", "nd", "rd"];
+                                                                const v = n % 100;
+                                                                return n + (s[(v - 20) % 10] || s[v] || s[0]);
+                                                            };
+
+                                                            updateLoan(addToHistory({
+                                                                ...loan,
+                                                                amount: Math.max(0, loan.amount - currentEmi),
+                                                                lastEmiPaymentDate: new Date().toISOString()
+                                                            }, "payment", `${getOrdinal(emiPmtCount)} EMI Paid`, currentEmi));
+                                                        },
+                                                        "Pay Now"
                                                     );
                                                 }}
                                             >
@@ -743,9 +911,15 @@ export function LoanList({ loans, typeFilter }: LoanListProps) {
                                         variant="outline"
                                         onClick={() => {
                                             showConfirm(
-                                                "Foreclose Loan",
-                                                `Are you sure you want to foreclose this loan? This will mark it as fully paid.`,
-                                                () => updateLoan({
+                                                "Confirm Foreclosure",
+                                                <div className="flex flex-col items-center gap-3 py-2">
+                                                    <span className="text-slate-500 text-sm font-medium">Paying Remaining Balance</span>
+                                                    <span className="text-4xl font-black text-rose-600 tracking-tight">{formatCurrency(dialog.payload.amount)}</span>
+                                                    <p className="text-xs text-slate-400 text-center max-w-[240px] leading-relaxed">
+                                                        This will clear the remaining loan balance and close the loan account.
+                                                    </p>
+                                                </div>,
+                                                () => updateLoan(addToHistory({
                                                     ...dialog.payload,
                                                     status: 'paid',
                                                     undoData: {
@@ -754,8 +928,8 @@ export function LoanList({ loans, typeFilter }: LoanListProps) {
                                                         previousAmount: dialog.payload.amount,
                                                         actionType: "payment"
                                                     }
-                                                }),
-                                                "Foreclose"
+                                                }, "payment", "Foreclosed loan", dialog.payload.amount)),
+                                                "Foreclose Loan"
                                             );
                                         }}
                                     >
@@ -804,69 +978,238 @@ export function LoanList({ loans, typeFilter }: LoanListProps) {
 
                     {dialog.type === "history" && dialog.payload && (
                         <div className="space-y-4 max-h-[60vh] overflow-y-auto pr-1">
-                            {!dialog.payload.history || dialog.payload.history.length === 0 ? (
-                                <div className="text-center py-8 text-muted-foreground">
-                                    <Clock className="h-8 w-8 mx-auto mb-2 opacity-20" />
-                                    <p>No history recorded yet.</p>
-                                </div>
-                            ) : (
-                                <div className="relative border-l border-slate-200 ml-3 space-y-6 py-2">
-                                    {(dialog.payload.history as any[]).map((item: any) => (
-                                        <div key={item.id} className="relative pl-6">
-                                            <div className={cn(
-                                                "absolute -left-[5px] top-1.5 h-2.5 w-2.5 rounded-full border-2 border-white ring-1",
-                                                item.action === "payment" ? "bg-green-500 ring-green-100" :
-                                                    item.action === "creation" ? "bg-blue-500 ring-blue-100" :
-                                                        item.action === "undo" ? "bg-orange-500 ring-orange-100" :
-                                                            "bg-slate-400 ring-slate-100"
-                                            )} />
-                                            <div className="flex flex-col gap-1">
-                                                <div className="flex items-center justify-between gap-4">
-                                                    <span className={cn(
-                                                        "text-sm font-semibold",
-                                                        item.action === "payment" ? "text-green-700" : "text-slate-700"
-                                                    )}>
-                                                        {item.action === "payment" ? "Payment Received" :
-                                                            item.action === "creation" ? "Loan Created" :
-                                                                item.action === "status_change" ? "Status Updated" :
-                                                                    item.action === "undo" ? "Action Undone" :
-                                                                        item.action === "edit" ? "Record Updated" : "Activity"}
-                                                    </span>
-                                                    <span className="text-[10px] text-muted-foreground whitespace-nowrap">
-                                                        {format(new Date(item.date), "MMM d, h:mm a")}
-                                                    </span>
-                                                </div>
-                                                <p className="text-xs text-slate-600">{item.description}</p>
-                                                {item.amount && (
-                                                    <span className="text-xs font-medium text-slate-900">
-                                                        {formatCurrency(item.amount)}
-                                                    </span>
-                                                )}
-                                            </div>
+                            {(() => {
+                                const history = [...(dialog.payload.history || [])];
+                                const hasCreation = history.some(h => h.action === 'creation');
+
+                                if (!hasCreation) {
+                                    const typeLabel = dialog.payload.loanType === 'lent' ? 'Lent' : 'Borrowed';
+
+                                    // Calculate Original Principal (Lent Amount)
+                                    let originalPrincipal = dialog.payload.amount; // Start with current, will adjust
+
+                                    // 1. Reconstruct Total Payable Original (Current + Paid History)
+                                    const totalPaidHistory = history
+                                        .filter(h => h.action === 'payment' && h.amount)
+                                        .reduce((sum, h) => sum + (h.amount || 0), 0);
+
+                                    const estimatedTotalOriginalPayable = dialog.payload.amount + totalPaidHistory;
+
+                                    if (dialog.payload.repaymentType === 'emi' && dialog.payload.tenureMonths && dialog.payload.emiAmount) {
+                                        // Use PV Formula to reverse engineer Principal
+                                        const r = (dialog.payload.interestRate || 0) / 12 / 100;
+                                        const n = dialog.payload.tenureMonths;
+                                        const emi = dialog.payload.emiAmount;
+
+                                        if (r > 0) {
+                                            // PV = EMI * [ (1 - (1+r)^-n) / r ]
+                                            originalPrincipal = emi * ((1 - Math.pow(1 + r, -n)) / r);
+                                        } else {
+                                            originalPrincipal = emi * n;
+                                        }
+                                    } else {
+                                        // One-time: Deduct interest from TotalRepayable
+                                        if (dialog.payload.fixedInterestAmount) {
+                                            originalPrincipal = estimatedTotalOriginalPayable - dialog.payload.fixedInterestAmount;
+                                        } else if (dialog.payload.interestRate && dialog.payload.interestRate > 0) {
+                                            // Total = P * (1 + R/100)  =>  P = Total / (1 + R/100)
+                                            originalPrincipal = estimatedTotalOriginalPayable / (1 + (dialog.payload.interestRate / 100));
+                                        } else {
+                                            originalPrincipal = estimatedTotalOriginalPayable;
+                                        }
+                                    }
+
+                                    // Precision cleanup
+                                    const rounded = Math.round(originalPrincipal);
+                                    if (Math.abs(originalPrincipal - rounded) < 0.1) {
+                                        originalPrincipal = rounded;
+                                    } else {
+                                        originalPrincipal = Math.round(originalPrincipal * 100) / 100;
+                                    }
+
+                                    // Generate Description
+                                    let description = "";
+                                    if (dialog.payload.repaymentType === 'emi') {
+                                        description = `${dialog.payload.interestRate}% p.a. • ${dialog.payload.tenureMonths} Months`;
+                                    } else {
+                                        if (dialog.payload.fixedInterestAmount) {
+                                            description = `Fixed Interest: ${formatCurrency(dialog.payload.fixedInterestAmount)}`;
+                                        } else if (dialog.payload.interestRate) {
+                                            description = `${dialog.payload.interestRate}% Interest`;
+                                        } else {
+                                            description = "No Interest";
+                                        }
+
+                                        if (dialog.payload.tenureMonths) {
+                                            description += ` • ${dialog.payload.tenureMonths} Months`;
+                                        } else {
+                                            description += ` • Single Repay`;
+                                        }
+                                    }
+
+                                    history.push({
+                                        id: 'creation-event',
+                                        action: 'creation',
+                                        date: dialog.payload.startDate,
+                                        description: description,
+                                        amount: originalPrincipal
+                                    });
+                                }
+
+                                const sortedHistory = history.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+                                if (sortedHistory.length === 0) {
+                                    return (
+                                        <div className="text-center py-8 text-muted-foreground">
+                                            <Clock className="h-8 w-8 mx-auto mb-2 opacity-20" />
+                                            <p>No history recorded yet.</p>
                                         </div>
-                                    ))}
+                                    );
+                                }
+
+                                return (
+                                    <div className="relative border-l border-slate-200 ml-3 space-y-6 py-2">
+                                        {sortedHistory.map((item: any) => (
+                                            <div key={item.id} className="relative pl-6">
+                                                <div className={cn(
+                                                    "absolute -left-[5px] top-1.5 h-2.5 w-2.5 rounded-full border-2 border-white ring-1",
+                                                    item.action === "payment" ? "bg-green-500 ring-green-100" :
+                                                        item.action === "creation" ? "bg-indigo-500 ring-indigo-100" :
+                                                            item.action === "undo" ? "bg-orange-500 ring-orange-100" :
+                                                                "bg-slate-400 ring-slate-100"
+                                                )} />
+                                                <div className="flex flex-col gap-1">
+                                                    <div className="flex items-center justify-between gap-4">
+                                                        <span className={cn(
+                                                            "text-sm font-semibold",
+                                                            item.action === "payment" ? "text-green-700" :
+                                                                item.action === "creation" ? "text-indigo-700" :
+                                                                    "text-slate-700"
+                                                        )}>
+                                                            {(() => {
+                                                                if (item.action === "payment") {
+                                                                    if (item.description?.toLowerCase().includes("emi")) return "EMI Payment";
+                                                                    if (item.description?.toLowerCase().includes("partial")) return "Partial Payment";
+                                                                    if (item.description?.toLowerCase().includes("fully paid") || item.description?.toLowerCase().includes("foreclose")) return "Full Payment";
+                                                                    return "Payment Received";
+                                                                }
+                                                                return item.action === "creation" ? (dialog.payload.loanType === 'lent' ? "Lent Initiated" : "Borrowed Initiated") :
+                                                                    item.action === "status_change" ? "Status Updated" :
+                                                                        item.action === "undo" ? "Action Undone" :
+                                                                            item.action === "edit" ? "Record Updated" : "Activity";
+                                                            })()}
+                                                        </span>
+                                                        <span className="text-[10px] text-muted-foreground whitespace-nowrap">
+                                                            {format(new Date(item.date), "MMM d, h:mm a")}
+                                                        </span>
+                                                    </div>
+                                                    <p className="text-xs text-slate-600">{item.description}</p>
+                                                    {item.amount && (
+                                                        <span className="text-xs font-medium text-slate-900">
+                                                            {formatCurrency(item.amount)}
+                                                        </span>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                );
+                            })()}
+                        </div>
+                    )}
+
+                    {dialog.type === "topup" && dialog.payload && (
+                        <div className="space-y-6 py-2">
+                            <div className="space-y-2">
+                                <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Top-up Amount</label>
+                                <Input
+                                    type="number"
+                                    placeholder="Enter amount..."
+                                    className="text-2xl font-bold h-14 text-center border-slate-200 focus:border-blue-500 focus:ring-blue-500/20"
+                                    value={topUpAmount}
+                                    onChange={(e) => setTopUpAmount(e.target.value)}
+                                    autoFocus
+                                />
+                            </div>
+
+                            {dialog.payload.repaymentType === 'emi' && (
+                                <div className="space-y-3">
+                                    <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Effect on Loan</label>
+                                    <div className="grid grid-cols-2 gap-3">
+                                        <button
+                                            onClick={() => setTopUpMode('tenure')}
+                                            className={cn(
+                                                "flex flex-col items-center justify-center p-4 rounded-xl border-2 transition-all gap-2 relative overflow-hidden",
+                                                topUpMode === 'tenure'
+                                                    ? "border-blue-500 bg-blue-50 text-blue-700 shadow-md transform scale-[1.02]"
+                                                    : "border-slate-100 bg-white text-slate-500 hover:border-slate-200 hover:bg-slate-50"
+                                            )}
+                                        >
+                                            <Clock className="h-6 w-6 mb-1" />
+                                            <span className="font-bold text-sm">Increase Tenure</span>
+                                            <span className="text-[10px] opacity-75">EMI stays same</span>
+                                            {topUpMode === 'tenure' && (
+                                                <div className="absolute top-2 right-2">
+                                                    <div className="h-2 w-2 rounded-full bg-blue-500 animate-pulse" />
+                                                </div>
+                                            )}
+                                        </button>
+
+                                        <button
+                                            onClick={() => setTopUpMode('emi')}
+                                            className={cn(
+                                                "flex flex-col items-center justify-center p-4 rounded-xl border-2 transition-all gap-2 relative overflow-hidden",
+                                                topUpMode === 'emi'
+                                                    ? "border-purple-500 bg-purple-50 text-purple-700 shadow-md transform scale-[1.02]"
+                                                    : "border-slate-100 bg-white text-slate-500 hover:border-slate-200 hover:bg-slate-50"
+                                            )}
+                                        >
+                                            <TrendingUp className="h-6 w-6 mb-1" />
+                                            <span className="font-bold text-sm">Increase EMI</span>
+                                            <span className="text-[10px] opacity-75">Tenure stays same</span>
+                                            {topUpMode === 'emi' && (
+                                                <div className="absolute top-2 right-2">
+                                                    <div className="h-2 w-2 rounded-full bg-purple-500 animate-pulse" />
+                                                </div>
+                                            )}
+                                        </button>
+                                    </div>
                                 </div>
                             )}
+
+                            <Button
+                                className="w-full h-12 text-md font-semibold shadow-lg shadow-blue-500/20 bg-blue-600 hover:bg-blue-700 text-white"
+                                onClick={submitTopUp}
+                            >
+                                Confirm Top Up
+                            </Button>
                         </div>
                     )}
 
                     {dialog.type === "prompt" && (
-                        <div className="py-2">
-                            <Input
-                                ref={promptInputRef}
-                                value={promptValue}
-                                onChange={(e) => setPromptValue(e.target.value)}
-                                placeholder={dialog.placeholder}
-                                onKeyDown={(e) => {
-                                    if (e.key === "Enter") {
-                                        dialog.onConfirm(promptValue);
-                                    }
-                                }}
-                            />
+                        <div className="flex flex-col items-center gap-4 py-4">
+                            <span className="text-slate-500 text-sm font-medium text-center px-4">
+                                {dialog.placeholder}
+                            </span>
+                            <div className="relative w-full max-w-[240px]">
+                                <Input
+                                    ref={promptInputRef}
+                                    type="number"
+                                    className="text-center text-4xl font-black h-20 border-0 border-b-2 border-slate-200 focus-visible:ring-0 focus-visible:border-indigo-500 rounded-none px-2 placeholder:text-slate-200 text-slate-800 bg-transparent shadow-none"
+                                    value={promptValue}
+                                    onChange={(e) => setPromptValue(e.target.value)}
+                                    placeholder="0"
+                                    onKeyDown={(e) => {
+                                        if (e.key === "Enter") {
+                                            dialog.onConfirm(promptValue);
+                                        }
+                                    }}
+                                />
+                            </div>
                         </div>
                     )}
 
-                    {dialog.type !== "payment" && dialog.type !== "history" && (
+                    {dialog.type !== "payment" && dialog.type !== "history" && dialog.type !== "topup" && (
                         <div className="flex justify-end gap-3 mt-6">
                             {dialog.type !== "alert" && (
                                 <Button

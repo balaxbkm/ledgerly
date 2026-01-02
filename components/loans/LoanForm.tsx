@@ -77,14 +77,24 @@ export function LoanForm({ onSuccess, initialType = "lent" }: LoanFormProps) {
                 ? format(addMonths(new Date(data.startDate), data.tenureMonths), "yyyy-MM-dd")
                 : data.dueDate;
 
-            // Calculate EMI Amount
+            // Calculate EMI Amount (Standard Reducing Balance)
             let calculatedEmi = 0;
             if (data.repaymentType === "emi" && data.tenureMonths && data.tenureMonths > 0) {
                 const principal = Number(data.amount);
-                const rate = Number(data.interestRate || 0);
-                const totalInterest = principal * (rate / 100);
-                const totalPayable = principal + totalInterest;
-                calculatedEmi = parseFloat((totalPayable / data.tenureMonths).toFixed(2));
+                const annualRate = Number(data.interestRate || 0);
+
+                if (annualRate > 0) {
+                    const monthlyRate = annualRate / 12 / 100;
+                    const tenureMonths = data.tenureMonths;
+
+                    // EMI Formula: P * r * (1 + r)^n / ((1 + r)^n - 1)
+                    const x = Math.pow(1 + monthlyRate, tenureMonths);
+                    calculatedEmi = (principal * monthlyRate * x) / (x - 1);
+                } else {
+                    calculatedEmi = principal / data.tenureMonths;
+                }
+
+                calculatedEmi = parseFloat(calculatedEmi.toFixed(2));
             }
 
             await addLoan({
@@ -94,7 +104,7 @@ export function LoanForm({ onSuccess, initialType = "lent" }: LoanFormProps) {
                 loanType: data.loanType,
                 repaymentType: data.repaymentType,
                 status: "pending",
-                interestRate: data.interestRate ? Number(data.interestRate) : undefined,
+                interestRate: data.interestRate ? Number(data.interestRate) : undefined, // Stored as Annual %
                 tenureMonths: data.repaymentType === "emi" ? Number(data.tenureMonths) : undefined,
                 fixedInterestAmount: data.repaymentType === "one-time" ? Number(data.fixedInterestAmount) : undefined,
                 dueDate: finalDueDate,

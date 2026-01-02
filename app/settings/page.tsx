@@ -10,12 +10,12 @@ import { cn } from "@/utils/cn";
 
 export default function SettingsPage() {
     const { theme, setTheme } = useTheme();
-    const { refreshData, seedData } = useFinance();
+    const { refreshData, seedData, clearData } = useFinance();
     const { logout } = useAuth();
 
-    const handleReset = () => {
+    const handleReset = async () => {
         if (confirm("Are you sure you want to delete ALL data? This cannot be undone.")) {
-            localStorage.clear();
+            await clearData();
             window.location.reload();
         }
     };
@@ -121,7 +121,7 @@ export default function SettingsPage() {
             </Card>
 
             <div className="flex justify-center pt-8 opacity-50">
-                <p className="text-xs text-slate-400 font-medium">Ledgerly v1.0.0 • Local Storage Mode</p>
+                <p className="text-xs text-slate-400 font-medium">Ledgerly v1.0.0 • Connected to Firebase</p>
             </div>
         </div>
     );

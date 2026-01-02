@@ -1,11 +1,12 @@
 "use client";
 
 import { useState } from "react";
-import { Plus, ArrowRightLeft, TrendingUp, TrendingDown, AlertOctagon } from "lucide-react";
+import { Plus, ArrowRightLeft, TrendingUp, TrendingDown, AlertOctagon, Search } from "lucide-react";
 import { useFinance } from "@/context/FinanceContext";
 import { LoanList } from "@/components/loans/LoanList";
 import { LoanForm } from "@/components/loans/LoanForm";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Modal } from "@/components/ui/modal";
 import { cn, formatCurrency } from "@/utils/cn";
 
@@ -13,12 +14,17 @@ export default function LoansPage() {
     const { loans } = useFinance();
     const [isAddOpen, setIsAddOpen] = useState(false);
     const [activeTab, setActiveTab] = useState<"lent" | "borrowed">("lent");
+    const [searchQuery, setSearchQuery] = useState("");
 
     const lentCount = loans.filter((l) => l.loanType === "lent" && l.status === "pending").length;
     const borrowedCount = loans.filter((l) => l.loanType === "borrowed" && l.status === "pending").length;
     const writeOffTotal = loans
         .filter((l) => l.status === "written-off")
         .reduce((sum, l) => sum + (l.amount || 0), 0);
+
+    const filteredLoans = loans.filter(l =>
+        l.personName.toLowerCase().includes(searchQuery.toLowerCase())
+    );
 
     return (
         <div className="space-y-6">
@@ -132,11 +138,22 @@ export default function LoansPage() {
 
             {/* Content */}
             <div className="space-y-4">
-                <h2 className="text-lg font-semibold flex items-center gap-2">
-                    {activeTab === "lent" ? "People who owe you" : "People you owe"}
-                    <ArrowRightLeft className="h-4 w-4 text-muted-foreground" />
-                </h2>
-                <LoanList loans={loans} typeFilter={activeTab} />
+                <div className="flex items-center justify-between">
+                    <h2 className="text-lg font-semibold flex items-center gap-2">
+                        {activeTab === "lent" ? "People who owe you" : "People you owe"}
+                        <ArrowRightLeft className="h-4 w-4 text-muted-foreground" />
+                    </h2>
+                    <div className="relative w-48 sm:w-64">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+                        <Input
+                            placeholder="Search people..."
+                            className="pl-9 h-9 text-sm bg-white"
+                            value={searchQuery}
+                            onChange={(e) => setSearchQuery(e.target.value)}
+                        />
+                    </div>
+                </div>
+                <LoanList loans={filteredLoans} typeFilter={activeTab} />
             </div>
 
             {/* Modal */}

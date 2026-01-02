@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { format, addMonths, subMonths, startOfMonth, endOfMonth, startOfWeek, endOfWeek, eachDayOfInterval, isSameMonth, isSameDay, isToday } from "date-fns";
-import { Calendar as CalendarIcon, ChevronLeft, ChevronRight } from "lucide-react";
+import { Calendar as CalendarIcon, ChevronLeft, ChevronRight, ChevronDown } from "lucide-react";
 import { cn } from "@/utils/cn";
 import { Button } from "@/components/ui/button";
 
@@ -35,6 +35,8 @@ export function CustomDatePicker({ value, onChange, placeholder = "Select date",
             const date = typeof value === 'string' ? new Date(value) : value;
             setSelectedDate(date);
             setViewDate(date); // Sync view to selected date
+        } else {
+            setSelectedDate(undefined);
         }
     }, [value]);
 
@@ -97,6 +99,19 @@ export function CustomDatePicker({ value, onChange, placeholder = "Select date",
         setIsOpen(false);
     };
 
+    const handleClear = (e: React.MouseEvent) => {
+        e.stopPropagation();
+        onChange(""); // Assuming parent handles empty string or check validity
+        setSelectedDate(undefined);
+        setIsOpen(false);
+    };
+
+    const handleToday = (e: React.MouseEvent) => {
+        e.stopPropagation();
+        const today = new Date();
+        handleDayClick(today);
+    };
+
     // Generate days
     const monthStart = startOfMonth(viewDate);
     const monthEnd = endOfMonth(monthStart);
@@ -116,19 +131,19 @@ export function CustomDatePicker({ value, onChange, placeholder = "Select date",
                     variant="outline"
                     onClick={toggleOpen}
                     className={cn(
-                        "w-full pl-3 text-left font-normal h-11 border-slate-200 bg-white hover:bg-slate-50 transition-all rounded-xl",
+                        "w-full pl-3 text-left font-normal h-11 border-slate-200 bg-white hover:bg-slate-50 transition-all rounded-xl relative overflow-hidden",
                         !value && "text-muted-foreground",
-                        isOpen && "ring-2 ring-indigo-500 border-indigo-500"
+                        isOpen && "ring-2 ring-blue-500 border-blue-500"
                     )}
                 >
                     {selectedDate ? (
                         <span className="text-slate-900 font-medium tracking-tight">
-                            {format(selectedDate, "dd MMM yyyy")}
+                            {format(selectedDate, "dd-MM-yyyy")}
                         </span>
                     ) : (
                         <span className="text-slate-400">{placeholder}</span>
                     )}
-                    <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
+                    <CalendarIcon className="ml-auto h-4 w-4 opacity-50 absolute right-3" />
                 </Button>
 
                 {isOpen && typeof document !== "undefined" && createPortal(
@@ -139,18 +154,21 @@ export function CustomDatePicker({ value, onChange, placeholder = "Select date",
                             left: dropdownPos.left,
                             position: "absolute"
                         }}
-                        className="z-[9999] mt-2 w-72 p-4 rounded-xl border border-slate-200 bg-white shadow-2xl animate-in fade-in zoom-in-95 duration-200 origin-top-left ring-1 ring-black/5"
+                        className="z-[9999] mt-2 w-[280px] p-4 rounded-xl border border-slate-200 bg-white shadow-xl animate-in fade-in zoom-in-95 duration-200 origin-top-left"
                     >
                         {/* Header */}
-                        <div className="flex items-center justify-between mb-4">
-                            <span className="text-base font-bold text-slate-800">
-                                {format(viewDate, "MMMM yyyy")}
-                            </span>
-                            <div className="flex gap-1">
-                                <button type="button" onClick={handlePrevMonth} className="p-1 rounded-lg hover:bg-slate-100 text-slate-500 hover:text-slate-800 transition-colors">
+                        <div className="flex items-center justify-between mb-4 px-1">
+                            <div className="flex items-center gap-1 cursor-pointer hover:bg-slate-50 p-1 rounded-md transition-colors">
+                                <span className="text-sm font-bold text-slate-900">
+                                    {format(viewDate, "MMMM, yyyy")}
+                                </span>
+                                <ChevronDown className="h-4 w-4 text-slate-500" />
+                            </div>
+                            <div className="flex gap-2">
+                                <button type="button" onClick={handlePrevMonth} className="text-slate-500 hover:text-slate-900 transition-colors p-1 hover:bg-slate-100 rounded-lg">
                                     <ChevronLeft className="h-5 w-5" />
                                 </button>
-                                <button type="button" onClick={handleNextMonth} className="p-1 rounded-lg hover:bg-slate-100 text-slate-500 hover:text-slate-800 transition-colors">
+                                <button type="button" onClick={handleNextMonth} className="text-slate-500 hover:text-slate-900 transition-colors p-1 hover:bg-slate-100 rounded-lg">
                                     <ChevronRight className="h-5 w-5" />
                                 </button>
                             </div>
@@ -159,14 +177,14 @@ export function CustomDatePicker({ value, onChange, placeholder = "Select date",
                         {/* Weekday Names */}
                         <div className="grid grid-cols-7 mb-2 text-center">
                             {weekDays.map((d) => (
-                                <span key={d} className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">
+                                <span key={d} className="text-[12px] font-medium text-slate-500">
                                     {d}
                                 </span>
                             ))}
                         </div>
 
                         {/* Calendar Grid */}
-                        <div className="grid grid-cols-7 gap-1">
+                        <div className="grid grid-cols-7 gap-y-1 gap-x-1">
                             {days.map((day, idx) => {
                                 const isSelected = selectedDate ? isSameDay(day, selectedDate) : false;
                                 const isCurrentMonth = isSameMonth(day, monthStart);
@@ -178,17 +196,35 @@ export function CustomDatePicker({ value, onChange, placeholder = "Select date",
                                         type="button"
                                         onClick={() => handleDayClick(day)}
                                         className={cn(
-                                            "h-9 w-9 rounded-lg flex items-center justify-center text-sm transition-all focus:outline-none focus:ring-2 focus:ring-indigo-500/50",
+                                            "h-8 w-8 rounded-lg flex items-center justify-center text-sm transition-all relative",
                                             !isCurrentMonth && "text-slate-300",
-                                            isCurrentMonth && "text-slate-700 hover:bg-slate-100 font-medium",
-                                            isTodayDate && !isSelected && "bg-indigo-50 text-indigo-700 font-bold decoration-2 decoration-indigo-500",
-                                            isSelected && "bg-[#0f1729] text-white font-bold shadow-lg shadow-[#0f1729]/30 hover:bg-[#0f1729] hover:text-white"
+                                            isCurrentMonth && "text-slate-700 hover:bg-blue-50 font-medium",
+                                            isTodayDate && !isSelected && "text-blue-600 font-bold",
+                                            isSelected && "bg-blue-600 text-white font-bold shadow-md shadow-blue-500/20 hover:bg-blue-700 hover:text-white"
                                         )}
                                     >
                                         {format(day, "d")}
                                     </button>
                                 );
                             })}
+                        </div>
+
+                        {/* Footer - Clear / Today */}
+                        <div className="flex items-center justify-between mt-4 pt-3 border-t border-slate-100">
+                            <button
+                                type="button"
+                                onClick={handleClear}
+                                className="text-sm font-medium text-blue-500 hover:text-blue-700 transition-colors"
+                            >
+                                Clear
+                            </button>
+                            <button
+                                type="button"
+                                onClick={handleToday}
+                                className="text-sm font-medium text-blue-500 hover:text-blue-700 transition-colors"
+                            >
+                                Today
+                            </button>
                         </div>
                     </div>,
                     document.body

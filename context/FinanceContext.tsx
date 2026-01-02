@@ -3,7 +3,7 @@
 import React, { createContext, useContext, useEffect, useState, useCallback } from "react";
 import { Expense, Loan, Settings, Category } from "@/types";
 import { StorageService } from "@/services/storage/StorageService";
-import { LocalStorageAdapter } from "@/services/storage/LocalStorageAdapter";
+import { FirebaseAdapter } from "@/services/storage/FirebaseAdapter";
 import { useAuth } from "@/context/AuthContext";
 import { CATEGORY_COLORS, CATEGORY_ICONS } from "@/utils/constants";
 
@@ -33,6 +33,7 @@ interface FinanceContextType {
     saveSettings: (settings: Settings) => Promise<void>;
     refreshData: () => Promise<void>;
     seedData: (force?: boolean) => Promise<void>;
+    clearData: () => Promise<void>;
 }
 
 const FinanceContext = createContext<FinanceContextType | undefined>(undefined);
@@ -41,7 +42,7 @@ const FinanceContext = createContext<FinanceContextType | undefined>(undefined);
 
 export function FinanceProvider({ children }: { children: React.ReactNode }) {
     const { isAuthenticated } = useAuth();
-    const [storage] = useState<StorageService>(() => new LocalStorageAdapter());
+    const [storage] = useState<StorageService>(() => new FirebaseAdapter());
 
     const [expenses, setExpenses] = useState<Expense[]>([]);
     const [loans, setLoans] = useState<Loan[]>([]);
@@ -172,6 +173,11 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
         await loadData();
     };
 
+    const clearData = async () => {
+        await storage.clearAll();
+        await loadData();
+    };
+
     return (
         <FinanceContext.Provider
             value={{
@@ -192,6 +198,7 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
                 saveSettings,
                 refreshData: loadData,
                 seedData,
+                clearData,
             }}
         >
             {children}
